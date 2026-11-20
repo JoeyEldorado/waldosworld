@@ -1,0 +1,39 @@
+{
+  "name": "waldos-world-youtube-monitor",
+  "description": "Daily monitor for the YouTube channel @WaldosWorld. Fetches the latest videos, compares against the newest previously seen video persisted between runs, and creates a Gmail draft when a newer video is found. Scheduled daily at 09:00 Europe/Helsinki.",
+  "schedule": { "cron": "0 9 * * *", "timezone": "Europe/Helsinki" },
+  "state": { "file": "state.json", "keys": ["lastVideoId", "lastPublished", "seen", "lastCheckAt"] },
+  "steps": [
+    {
+      "id": "1-fetch",
+      "name": "Fetch latest videos",
+      "action": "http_get",
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC6xNwCtnpXrWdFzDqn3lupg",
+      "parse": "rss entries -> [{videoId, title, published, link}] sorted by published desc",
+      "implementation": "workflow/fetch_videos.py"
+    },
+    {
+      "id": "2-compare",
+      "name": "Compare against persisted state",
+      "action": "read_state",
+      "file": "state.json",
+      "logic": "new videos = entries with published > state.lastPublished and videoId not in state.seen"
+    },
+    {
+      "id": "3-notify",
+      "name": "Create Gmail draft if newer video found",
+      "action": "gmail_create_draft",
+      "to": ["joey.eldorado@gmail.com"],
+      "subject": "New video on Waldo's World",
+      "body": "For each new video: title, published date, link (https://www.youtube.com/watch?v=<videoId>)",
+      "condition": "new videos found (or .force-draft flag present)"
+    },
+    {
+      "id": "4-persist",
+      "name": "Persist state",
+      "action": "write_state",
+      "file": "state.json",
+      "fields": { "lastVideoId": "newest videoId", "lastPublished": "newest published", "seen": "last 50 videoIds", "lastCheckAt": "ISO timestamp of run" }
+    }
+  ]
+}
