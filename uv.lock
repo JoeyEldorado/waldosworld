@@ -1687,7 +1687,6 @@ dependencies = [
     { name = "mistralai" },
     { name = "mistralai-workflows", extra = ["mistralai"] },
     { name = "pydantic" },
-    { name = "pyjwt", extra = ["crypto"] },
     { name = "structlog" },
     { name = "utils" },
 ]
@@ -1704,7 +1703,6 @@ requires-dist = [
     { name = "mistralai", specifier = ">=3.6.0" },
     { name = "mistralai-workflows", extras = ["mistralai"], specifier = ">=3.17.1", index = "https://pypi.org/simple" },
     { name = "pydantic", specifier = ">=2.14.1" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.0" },
     { name = "structlog", specifier = ">=25.5.0" },
     { name = "utils", editable = "packages/py/utils" },
 ]

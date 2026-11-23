@@ -29,15 +29,23 @@ baseline so the schedule only fires on genuinely new videos).
 ## Deploy (managed deployment)
 
 1. Push this repo to GitHub (branch + PR per team convention).
-2. In console.mistral.ai → **Secrets**, create two workspace secrets:
+2. In console.mistral.ai → **Secrets**, create workspace secrets:
    - `mistral_api_key` — a Mistral API key value (worker calls the Mistral Files API for state).
-   - `gmail_service_account_json` — a Google Cloud service-account key (JSON) with the Gmail
-     API enabled and domain-wide delegation for `joey.eldorado@gmail.com`.
+   - Gmail auth for a **private** Gmail account uses OAuth, not a service account
+     (domain-wide delegation needs Workspace). Create a Google Cloud OAuth client
+     (Desktop app type, Gmail API enabled), run the one-time consent flow as
+     `joey.eldorado@gmail.com` with scope `gmail.compose` and `access_type=offline`
+     to get a refresh token, then store three secrets:
+     `gmail_oauth_client_id`, `gmail_oauth_client_secret`, `gmail_oauth_refresh_token`.
+     The workflow activity exchanges the refresh token for a short-lived access token
+     and calls the Gmail REST API — no user present needed, so schedules work.
 3. Deploy via the Mistral MCP server (`deploy_workflow_deployment`):
    `github_url=<repo>`, `revision=<pushed commit SHA>`, `deployment_name="waldos-world-monitor"`,
    `build_directory="."`, `dockerfile_path="deploy/docker/Dockerfile.worker"`,
    `secrets=[{secret_name: "mistral_api_key", env_var_name: "MISTRAL_API_KEY"},
-             {secret_name: "gmail_service_account_json", env_var_name: "GMAIL_SERVICE_ACCOUNT_JSON"}]`.
+             {secret_name: "gmail_oauth_client_id", env_var_name: "GMAIL_OAUTH_CLIENT_ID"},
+             {secret_name: "gmail_oauth_client_secret", env_var_name: "GMAIL_OAUTH_CLIENT_SECRET"},
+             {secret_name: "gmail_oauth_refresh_token", env_var_name: "GMAIL_OAUTH_REFRESH_TOKEN"}]`.
 4. `wait_workflow_deployment_ready` until the revision serves, then `execute_workflow` once with
    `{"dry_run": true}` to verify and seed state.
 5. `create_workflow_schedule`: `workflow_identifier="waldos-world-monitor"`,

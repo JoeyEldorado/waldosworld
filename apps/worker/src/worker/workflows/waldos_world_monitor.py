@@ -139,28 +139,18 @@ async def save_state(state: dict) -> str:
 
 @workflows.activity(start_to_close_timeout=timedelta(seconds=60), retry_policy_max_attempts=1)
 async def create_gmail_draft(videos: list[Video]) -> str:
-    """Step 3: create a Gmail draft via the Gmail REST API, authenticated with
-    a service-account key from the GMAIL_SERVICE_ACCOUNT_JSON workspace secret
-    (domain-wide delegation, acting as GMAIL_RECIPIENT). Returns the draft ID."""
-    import time
-
+    """Step 3: create a Gmail draft via the Gmail REST API. Auth is OAuth for a
+    private Gmail account: the GMAIL_OAUTH_REFRESH_TOKEN workspace secret (plus
+    client id/secret) is exchanged here for a short-lived access token scoped to
+    gmail.compose, acting as the account that granted consent. Returns draft ID."""
     import httpx
-    import jwt
 
-    sa = json.loads(_env("GMAIL_SERVICE_ACCOUNT_JSON"))
-    now = int(time.time())
-    assertion = jwt.encode(
-        {
-            "iss": sa["client_email"],
-            "scope": GMAIL_SCOPE,
-            "aud": TOKEN_URL,
-            "iat": now,
-            "exp": now + 3600,
-            "sub": GMAIL_RECIPIENT,
-        },
-        sa["private_key"],
-        algorithm="RS256",
-    )
+    token_request = {
+        "grant_type": "refresh_token",
+        "client_id": _env("GMAIL_OAUTH_CLIENT_ID"),
+        "client_secret": _env("GMAIL_OAUTH_CLIENT_SECRET"),
+        "refresh_token": _env("GMAIL_OAUTH_REFRESH_TOKEN"),
+    }
     lines = ["New video" + ("s" if len(videos) > 1 else "") + " on Waldo's World:", ""]
     for v in videos:
         lines.append(f"- {v.title}")
@@ -173,13 +163,7 @@ async def create_gmail_draft(videos: list[Video]) -> str:
         f"\r\n" + "\n".join(lines) + "\r\n"
     ).encode("utf-8")
     async with httpx.AsyncClient(timeout=30.0) as http:
-        token_resp = await http.post(
-            TOKEN_URL,
-            data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                "assertion": assertion,
-            },
-        )
+        token_resp = await http.post(TOKEN_URL, data=token_request)
         token_resp.raise_for_status()
         access_token = token_resp.json()["access_token"]
         draft_resp = await http.post(
