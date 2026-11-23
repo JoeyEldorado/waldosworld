@@ -4,7 +4,7 @@
 // Set the file `.force-draft` next to state.json to force a draft on a run.
 
 async function main() {
-  const DIR = '/home/jds9/waldos-world-workflow';
+  const DIR = '/home/jds9/waldos-world-workflow/local-cli';
   const STATE_PATH = DIR + '/state.json';
   const FLAG_PATH = DIR + '/.force-draft';
   const RECIPIENT = 'joey.eldorado@gmail.com';

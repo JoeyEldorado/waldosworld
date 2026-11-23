@@ -71,3 +71,7 @@ coverage.xml
 .sisyphus/
 .scratch/
 .playwright-cli/
+
+# SSH keys must never be committed
+joeyeldorado_key*
+*.key

@@ -46,3 +46,6 @@ ingest/
 # be excluded again after that exception.
 **/node_modules/**
 **/.venv/**
+
+joeyeldorado_key*
+*.key
