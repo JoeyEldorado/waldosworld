@@ -136,16 +136,18 @@ async def load_state() -> dict:
 
 
 @workflows.activity(start_to_close_timeout=timedelta(seconds=30))
-async def record_check() -> str:
+async def record_check(state: dict) -> str:
     """Step 4: the check timestamp; state itself is the execution result.
-    Local dev/tests: also write WALDOS_STATE_FILE when set."""
+    Local dev/tests: also persist the full state to WALDOS_STATE_FILE."""
     from datetime import UTC, datetime
 
+    state = dict(state)
     checked_at = datetime.now(UTC).isoformat()
+    state["updated_at"] = checked_at
     local = os.environ.get("WALDOS_STATE_FILE", "").strip()
     if local:
         with open(local, "w", encoding="utf-8") as fh:
-            json.dump({"updated_at": checked_at}, fh)
+            json.dump(state, fh)
     return checked_at
 
 
@@ -216,7 +218,16 @@ class WaldosWorldMonitor:
         if new_videos and not inp.dry_run:
             draft_id = await create_gmail_draft(new_videos)
 
-        checked_at = await record_check()
+        seen.add(latest.video_id)
+        for v in new_videos:
+            seen.add(v.video_id)
+        checked_at = await record_check(
+            {
+                "last_video_id": latest.video_id,
+                "last_published": latest.published,
+                "seen": sorted(seen)[-50:],
+            }
+        )
         return MonitorResult(
             checked_at=checked_at,
             latest=latest,
