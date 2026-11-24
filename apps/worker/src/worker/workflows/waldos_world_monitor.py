@@ -89,9 +89,12 @@ async def fetch_latest_videos() -> list[Video]:
 
 
 def _mistral_client():
-    from mistralai.client import Mistral
+    # The app's own client: on a managed deployment the platform mounts a
+    # service-account token at MISTRAL_SA_TOKEN_PATH (MISTRAL_API_KEY is
+    # reserved there); locally it falls back to MISTRAL_API_KEY.
+    from utils.mistral import mistral_client
 
-    return Mistral(api_key=_env("MISTRAL_API_KEY"))
+    return mistral_client()
 
 
 @workflows.activity(start_to_close_timeout=timedelta(seconds=60))

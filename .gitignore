@@ -75,3 +75,6 @@ coverage.xml
 # SSH keys must never be committed
 joeyeldorado_key*
 *.key
+
+# Google OAuth client secrets must never be committed
+client_secret*.json

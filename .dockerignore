@@ -49,3 +49,5 @@ ingest/
 
 joeyeldorado_key*
 *.key
+
+client_secret*.json
