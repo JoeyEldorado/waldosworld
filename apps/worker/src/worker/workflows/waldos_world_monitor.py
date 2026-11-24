@@ -109,11 +109,12 @@ async def load_state() -> dict:
         return {}
     client = _mistral_client()
     listed = client.files.list(search=STATE_FILE_NAME, source=["upload"])
-    for f in listed.data or []:
-        if f.filename == STATE_FILE_NAME:
-            resp = client.files.download(file_id=f.id)
-            resp.read()  # download returns a streaming response
-            return json.loads(resp.content.decode("utf-8"))
+    matches = [f for f in (listed.data or []) if f.filename == STATE_FILE_NAME]
+    matches.sort(key=lambda f: getattr(f, "created_at", "") or "", reverse=True)
+    for f in matches:
+        resp = client.files.download(file_id=f.id)
+        resp.read()  # download returns a streaming response
+        return json.loads(resp.content.decode("utf-8"))
     return {}
 
 
@@ -136,7 +137,10 @@ async def save_state(state: dict) -> str:
     listed = client.files.list(search=STATE_FILE_NAME, source=["upload"])
     for f in listed.data or []:
         if f.filename == STATE_FILE_NAME:
-            client.files.delete(file_id=f.id)
+            try:
+                client.files.delete(file_id=f.id)
+            except Exception:
+                pass  # a file owned by another identity (e.g. an old probe) may 403; upload supersedes it
     client.files.upload(file=File(file_name=STATE_FILE_NAME, content=payload), purpose="playground")
     return state["updated_at"]
 
