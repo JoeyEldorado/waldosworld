@@ -136,7 +136,7 @@ async def save_state(state: dict) -> str:
     for f in listed.data or []:
         if f.file_name == STATE_FILE_NAME:
             client.files.delete(file_id=f.id)
-    client.files.upload(file=File(file_name=STATE_FILE_NAME, content=payload), purpose="assistants")
+    client.files.upload(file=File(file_name=STATE_FILE_NAME, content=payload), purpose="batch")
     return state["updated_at"]
 
 
