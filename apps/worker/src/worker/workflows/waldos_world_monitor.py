@@ -88,6 +88,9 @@ async def fetch_latest_videos() -> list[Video]:
         link = entry.find("atom:link", ns)
         if vid is None or title is None or published is None or link is None:
             continue
+        href = link.get("href") or ""
+        if "/shorts/" in href:
+            continue  # the /videos tab excludes Shorts; the feed includes them
         videos.append(
             Video(
                 video_id=vid.text or "",
