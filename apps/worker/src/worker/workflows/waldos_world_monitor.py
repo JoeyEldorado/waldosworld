@@ -2,10 +2,13 @@
 
 Fetches the latest videos of https://www.youtube.com/@WaldosWorld from the
 channel RSS feed, compares them against the newest previously seen video
-persisted between runs (a Mistral Files object, or a local file when
-WALDOS_STATE_FILE is set for local dev/tests), and creates a Gmail draft
-addressed to the channel owner when a newer video is found. Otherwise it does
-nothing. Scheduled daily at 09:00 Europe/Helsinki via a workflow schedule.
+persisted between runs, and creates a Gmail draft addressed to the account
+owner when a newer video is found. Otherwise it does nothing. Runs daily at
+09:00 Europe/Helsinki via a workflow schedule.
+
+State: the result of the latest COMPLETED execution of this workflow (read
+back through the Workflows API), so no external store is needed. For local
+dev/tests, set WALDOS_STATE_FILE to keep state in a local JSON file instead.
 """
 
 import base64
@@ -19,7 +22,7 @@ from pydantic import BaseModel
 
 CHANNEL_ID = "UC6xNwCtnpXrWdFzDqn3lupg"
 FEED_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
-STATE_FILE_NAME = "waldos-world-monitor-state.json"
+WORKFLOW_NAME = "waldos-world-monitor"
 GMAIL_RECIPIENT = "joey.eldorado@gmail.com"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -58,6 +61,15 @@ def _env(name: str) -> str:
     return value
 
 
+def _mistral_client():
+    # The app's own client: on a managed deployment the platform mounts a
+    # service-account token at MISTRAL_SA_TOKEN_PATH (MISTRAL_API_KEY is
+    # reserved there); locally it falls back to MISTRAL_API_KEY.
+    from utils.mistral import mistral_client
+
+    return mistral_client()
+
+
 @workflows.activity(start_to_close_timeout=timedelta(seconds=60))
 async def fetch_latest_videos() -> list[Video]:
     """Step 1: fetch the channel RSS feed and parse the latest videos."""
@@ -88,19 +100,10 @@ async def fetch_latest_videos() -> list[Video]:
     return videos
 
 
-def _mistral_client():
-    # The app's own client: on a managed deployment the platform mounts a
-    # service-account token at MISTRAL_SA_TOKEN_PATH (MISTRAL_API_KEY is
-    # reserved there); locally it falls back to MISTRAL_API_KEY.
-    from utils.mistral import mistral_client
-
-    return mistral_client()
-
-
 @workflows.activity(start_to_close_timeout=timedelta(seconds=60))
 async def load_state() -> dict:
-    """Step 2a: read persisted state (last seen video) from Mistral Files, or
-    from a local file when WALDOS_STATE_FILE is set (local dev and tests)."""
+    """Step 2a: persisted state = latest COMPLETED execution's result, read
+    through the Workflows API. Local dev/tests: WALDOS_STATE_FILE overrides."""
     local = os.environ.get("WALDOS_STATE_FILE", "").strip()
     if local:
         if os.path.exists(local):
@@ -108,41 +111,42 @@ async def load_state() -> dict:
                 return json.load(fh)
         return {}
     client = _mistral_client()
-    listed = client.files.list(search=STATE_FILE_NAME, source=["upload"])
-    matches = [f for f in (listed.data or []) if f.filename == STATE_FILE_NAME]
-    matches.sort(key=lambda f: getattr(f, "created_at", "") or "", reverse=True)
-    for f in matches:
-        resp = client.files.download(file_id=f.id)
-        resp.read()  # download returns a streaming response
-        return json.loads(resp.content.decode("utf-8"))
+    kwargs: dict = {"workflow_identifier": WORKFLOW_NAME, "sort_by": "end_time", "order": "desc", "page_size": 20}
+    deployment = os.environ.get("DEPLOYMENT_NAME", "").strip()
+    if deployment:
+        kwargs["deployment_name"] = deployment
+    runs = client.workflows.runs.list_runs(**kwargs)
+    for run in getattr(runs.result, "executions", []) or []:
+        if str(getattr(run, "status", "")).upper() != "COMPLETED":
+            continue
+        ex = client.workflows.executions.get_workflow_execution(execution_id=run.execution_id)
+        result = getattr(ex, "result", None)
+        if not result:
+            continue
+        latest = result.get("latest") or {}
+        seen = [v.get("video_id") for v in (result.get("new_videos") or []) if v.get("video_id")]
+        if latest.get("video_id"):
+            seen.append(latest["video_id"])
+        return {
+            "last_video_id": latest.get("video_id"),
+            "last_published": latest.get("published"),
+            "seen": seen,
+        }
     return {}
 
 
-@workflows.activity(start_to_close_timeout=timedelta(seconds=60), retry_policy_max_attempts=1)
-async def save_state(state: dict) -> str:
-    """Step 4: persist state between runs. Returns the update timestamp."""
+@workflows.activity(start_to_close_timeout=timedelta(seconds=30))
+async def record_check() -> str:
+    """Step 4: the check timestamp; state itself is the execution result.
+    Local dev/tests: also write WALDOS_STATE_FILE when set."""
     from datetime import UTC, datetime
 
-    state = dict(state)
-    state["updated_at"] = datetime.now(UTC).isoformat()
-    payload = json.dumps(state).encode("utf-8")
+    checked_at = datetime.now(UTC).isoformat()
     local = os.environ.get("WALDOS_STATE_FILE", "").strip()
     if local:
         with open(local, "w", encoding="utf-8") as fh:
-            fh.write(payload.decode("utf-8"))
-        return state["updated_at"]
-    from mistralai.client.models.file import File
-
-    client = _mistral_client()
-    listed = client.files.list(search=STATE_FILE_NAME, source=["upload"])
-    for f in listed.data or []:
-        if f.filename == STATE_FILE_NAME:
-            try:
-                client.files.delete(file_id=f.id)
-            except Exception:
-                pass  # a file owned by another identity (e.g. an old probe) may 403; upload supersedes it
-    client.files.upload(file=File(file_name=STATE_FILE_NAME, content=payload), purpose="playground")
-    return state["updated_at"]
+            json.dump({"updated_at": checked_at}, fh)
+    return checked_at
 
 
 @workflows.activity(start_to_close_timeout=timedelta(seconds=60), retry_policy_max_attempts=1)
@@ -184,7 +188,7 @@ async def create_gmail_draft(videos: list[Video]) -> str:
 
 
 @workflows.workflow.define(
-    name="waldos-world-monitor",
+    name=WORKFLOW_NAME,
     workflow_display_name="Waldo's World YouTube monitor",
     workflow_description=(
         "Fetches the latest videos of youtube.com/@WaldosWorld, compares them with the "
@@ -212,16 +216,7 @@ class WaldosWorldMonitor:
         if new_videos and not inp.dry_run:
             draft_id = await create_gmail_draft(new_videos)
 
-        seen.add(latest.video_id)
-        for v in new_videos:
-            seen.add(v.video_id)
-        checked_at = await save_state(
-            {
-                "last_video_id": latest.video_id,
-                "last_published": latest.published,
-                "seen": sorted(seen)[-50:],
-            }
-        )
+        checked_at = await record_check()
         return MonitorResult(
             checked_at=checked_at,
             latest=latest,
