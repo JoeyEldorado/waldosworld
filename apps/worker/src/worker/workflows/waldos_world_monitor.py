@@ -110,9 +110,10 @@ async def load_state() -> dict:
     client = _mistral_client()
     listed = client.files.list(search=STATE_FILE_NAME, source=["upload"])
     for f in listed.data or []:
-        if f.file_name == STATE_FILE_NAME:
-            content = client.files.download(file_id=f.id).content
-            return json.loads(content.decode("utf-8"))
+        if f.filename == STATE_FILE_NAME:
+            resp = client.files.download(file_id=f.id)
+            resp.read()  # download returns a streaming response
+            return json.loads(resp.content.decode("utf-8"))
     return {}
 
 
@@ -134,9 +135,9 @@ async def save_state(state: dict) -> str:
     client = _mistral_client()
     listed = client.files.list(search=STATE_FILE_NAME, source=["upload"])
     for f in listed.data or []:
-        if f.file_name == STATE_FILE_NAME:
+        if f.filename == STATE_FILE_NAME:
             client.files.delete(file_id=f.id)
-    client.files.upload(file=File(file_name=STATE_FILE_NAME, content=payload), purpose="batch")
+    client.files.upload(file=File(file_name=STATE_FILE_NAME, content=payload), purpose="playground")
     return state["updated_at"]
 
 
